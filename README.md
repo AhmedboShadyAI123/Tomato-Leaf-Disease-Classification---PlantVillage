@@ -76,3 +76,9 @@ Training curves showed overfitting starting around epoch 2 (validation loss risi
 - Try transfer learning (e.g. MobileNet, EfficientNet) once pretrained weights are accessible.
 - Extend to more of the 38 PlantVillage classes, or to other crops.
 - Investigate the healthy/Late_blight confusion further with targeted data augmentation or a higher-resolution input.
+
+- ## Project Links
+
+- GitHub: https://github.com/AhmedboShadyAI123/Tomato-Leaf-Disease-Classification---PlantVillage
+- Kaggle: https://www.kaggle.com/code/ahmedaboshadyai/tomato-leaf-disease-classification-plantvillage
+- Dataset: https://github.com/spMohanty/PlantVillage-Dataset
