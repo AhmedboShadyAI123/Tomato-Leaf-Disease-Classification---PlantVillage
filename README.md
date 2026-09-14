@@ -1,103 +1,78 @@
-# Credit Card Fraud Detection on Real Data (ULB Machine Learning Group)
+# Tomato Leaf Disease Classification on Real Data (PlantVillage)
 
 ## Overview
-This project detects fraudulent credit card transactions in a severely
-imbalanced, real-world dataset — a classic problem where naive accuracy is
-meaningless and the entire methodology (metrics, splitting, resampling) has
-to be built around the imbalance from the start.
+
+A Convolutional Neural Network trained from scratch on real photographs of tomato leaves to classify them as healthy, bacterial spot, or late blight — an early-detection tool for crop disease. Farmers often detect crop diseases too late, once damage has already spread across a field; automated classification from a single leaf photo lets them act before it spreads further.
 
 ## Dataset
-- **Source:** [Credit Card Fraud Detection](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) —
-  published by the Machine Learning Group at Université Libre de Bruxelles
-  (ULB), in collaboration with Worldline.
-- **284,807 real transactions** by European cardholders over 2 days in
-  September 2013, with **492 confirmed frauds (0.172%)**.
-- Features `V1`-`V28` are anonymized via PCA for confidentiality; `Time`
-  and `Amount` are the only original, unmodified fields.
 
-## Data Cleaning
-- **1,081 exact duplicate rows found and removed.** With 28 continuous PCA
-  features, an exact match across all of them is effectively impossible by
-  chance — these are almost certainly the same transaction captured twice
-  during data collection. Left in place, they would let the same
-  transaction leak between train and test splits.
-- **Feature scaling:** `Time` and `Amount` were scaled with `RobustScaler`
-  (less sensitive to `Amount`'s extreme outliers than a standard z-score
-  scaler); `V1`-`V28` were left as-is since they're already PCA components.
-- Post-cleaning: 283,726 rows, 473 frauds (0.167%).
+- **Source:** [PlantVillage Dataset](https://github.com/spMohanty/PlantVillage-Dataset) (Hughes & Salathé, 2015; Mohanty et al., 2016), obtained via git sparse-checkout from the official GitHub repository.
+- **5,627 real images** across 3 classes: `Bacterial_spot` (2,127), `Late_blight` (1,909), `healthy` (1,591) — scoped from the full 38-class PlantVillage dataset (tomato-only) to keep CPU training time practical.
+- Original images 256x256 RGB, resized to 80x80 for training.
 
-## Methodology
-1. **EDA** — class imbalance visualization, transaction amount by class
-   (revealing a more nuanced pattern than "fraud = lower amount": fraud has
-   a *lower median* but *higher mean and variance* than legitimate
-   transactions, suggesting a mix of small "card testing" fraud and larger
-   fraudulent charges).
-2. **Train/validation/test split** (64/16/20, stratified) — used instead of
-   heavy k-fold cross-validation, since Random Forest alone takes over a
-   minute per fit at this data scale; candidates are compared once on
-   validation, and the winner is retrained on train+validation before a
-   single, final evaluation on the untouched test set.
-3. **Three modeling approaches compared** by Average Precision (the metric
-   this dataset's own documentation recommends over accuracy or plain
-   ROC-AUC, given the ~600:1 imbalance):
-   - Logistic Regression (`class_weight="balanced"`)
-   - Random Forest (`class_weight="balanced_subsample"`)
-   - Logistic Regression on **SMOTE-oversampled training data only** — SMOTE
-     is fit strictly on the training fold, never on validation/test, to
-     avoid leaking synthetic near-duplicates of test fraud cases into
-     evaluation.
-4. **Explainability with SHAP** on the winning model.
+## Data Preparation
+
+- Images loaded and resized to 80x80, pixel values normalized to [0,1].
+- Class labels encoded 0/1/2 (alphabetical folder order: `Bacterial_spot`, `Late_blight`, `healthy`).
+- Data augmentation (random flip, rotation, zoom, contrast) applied during training only.
+- Stratified 70% / 15% / 15% split (train / validation / test).
+- Images loaded fully into memory as NumPy arrays rather than a streaming `tf.data` pipeline — a deliberate speed trade-off at this dataset size.
+
+## Exploratory Data Analysis
+
+- Class balance check and visual sample inspection per class.
+- The 3 classes are reasonably balanced (2,127 / 1,909 / 1,591), avoiding a severe class-imbalance problem.
+- Visually distinct disease signatures: bacterial spot shows small dark spots, late blight shows large brown patches, healthy leaves are uniformly green.
+
+## Model
+
+- A single CNN built from scratch (3 convolutional blocks + dense layers) — no pretrained/transfer-learning weights were used, since ImageNet weights could not be downloaded in this environment.
+- Adam optimizer, image size 80x80, batch size 64, up to 12 epochs, early stopping (patience=3, monitoring validation loss).
+- No systematic hyperparameter search was performed.
 
 ## Results
-| Model | Validation Average Precision |
-|---|---|
-| Logistic Regression | 0.814 |
-| **Random Forest** | **0.856** |
-| Logistic Regression + SMOTE | 0.825 |
 
-**Final model (Random Forest) on the held-out test set (95 real frauds, 56,651 real legitimate transactions):**
-| Metric | Value |
-|---|---|
-| Average Precision | 0.751 |
-| ROC-AUC | 0.966 |
-| Precision (Fraud) | 0.886 |
-| Recall (Fraud) | 0.737 |
+**Test accuracy:** 85.7% | **Test loss:** 0.411
 
-**Business impact:** the model catches **70 of 95 frauds (73.7%)** in the
-test period while flagging only **9 legitimate transactions out of 56,651**
-for review (a 0.016% false-alarm rate) — a workable trade-off for a real
-fraud review team.
+| Class | Precision | Recall | F1 |
+|---|---:|---:|---:|
+| Bacterial_spot | 0.96 | 0.87 | 0.91 |
+| Late_blight | 0.89 | 0.73 | 0.80 |
+| healthy | 0.74 | 1.00 | 0.85 |
 
-**Top fraud indicators (SHAP):** `V14`, `V12`, `V4`, and `V10` — these match
-the features most frequently cited as important in published analyses of
-this exact dataset, a strong sanity check that the pipeline is correct.
+**Confusion matrix highlights:** Bacterial_spot — 276 correct, 25 → Late_blight, 18 → healthy. Late_blight — 10 → Bacterial_spot, 210 correct, 67 → healthy. Healthy — 1 → Bacterial_spot, 0 → Late_blight, 238 correct.
+
+Training curves showed overfitting starting around epoch 2 (validation loss rising while training loss kept falling); early stopping correctly restored the best-validation-epoch weights rather than the final epoch's weights.
+
+**Most common error:** confusing `Late_blight` with `healthy` (67 cases) — plausible, since some early-stage late blight leaves are still mostly green. The `healthy` class shows perfect recall (1.00) but lower precision (0.74), meaning some diseased leaves are misclassified as healthy.
 
 ## Tech Stack
-- **Python**, **Pandas / NumPy** — data cleaning and processing
-- **scikit-learn** — Logistic Regression, Random Forest, evaluation metrics
-- **imbalanced-learn** — SMOTE (applied correctly, train-fold only)
-- **SHAP** — model explainability
-- **Matplotlib / Seaborn** — EDA and evaluation visualizations
+
+- **Python**
+- **TensorFlow/Keras** — CNN model
+- **NumPy, Pillow** — image loading and processing
+- **scikit-learn** — train/test split, classification report, confusion matrix
+- **Matplotlib** — visualizations
+- **Jupyter Notebook**
 
 ## Files
-- `Credit_Card_Fraud_Detection.ipynb` — full notebook, runs top to bottom
-- `creditcard.csv` — the real dataset (284,807 rows)
-- `eda_overview.png` — class distribution and amount-by-class
-- `transactions_over_time.png` — fraud vs. legitimate over the 2-day window
-- `model_comparison.png` — the three candidate approaches on validation
-- `model_evaluation.png` — confusion matrix, ROC curve, precision-recall curve
-- `shap_summary.png` — global feature importance
+
+- `Tomato_Disease_CNN_RealData.ipynb` — full notebook
+- `plantvillage_data.zip` — the real dataset (tomato subset)
+- `sample_leaves.png` — one sample image per class
+- `training_curves.png` — training/validation accuracy and loss over epochs
+- `confusion_matrix.png` — confusion matrix on the held-out test set
+- `sample_predictions.png` — model predictions on real test images
 
 ## Limitations
-`V1`-`V28` are anonymized PCA components, so SHAP explains predictions in
-terms of `V14`, `V4`, etc. rather than human-readable business concepts — a
-real deployment would need the issuing bank's original, non-anonymized
-feature set to turn this into plain-language fraud reasons for an analyst.
+
+- Only 3 of the 38 PlantVillage classes were used (tomato-related only), to keep CPU training time practical.
+- No transfer learning was used, due to no network access to pretrained weights.
+- Only a single CNN architecture was tried; no comparison models were built.
+- Real-photo accuracy (85.7%) is notably lower than the ~99% typically seen on synthetic-image versions of similar datasets — a useful illustration of the real-vs-synthetic-data accuracy gap.
 
 ## Possible Next Steps
-- Try XGBoost/LightGBM with `scale_pos_weight` for potentially stronger
-  performance at similar training cost.
-- Add a cost-sensitive threshold tuned to the bank's actual cost of a missed
-  fraud vs. a false alarm, rather than the default 0.5 probability cutoff.
-- Build a real-time scoring API and a simple review dashboard for flagged
-  transactions.
+
+- Try transfer learning (e.g. MobileNet, EfficientNet) once pretrained weights are accessible.
+- Extend to more of the 38 PlantVillage classes, or to other crops.
+- Investigate the healthy/Late_blight confusion further with targeted data augmentation or a higher-resolution input.
